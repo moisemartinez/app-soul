@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Detalle del Ticket - Sistema de Tickets</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Font Awesome CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <!-- SweetAlert2 CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <!-- Firebase SDKs -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
+    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
+    import { getFirestore, doc, getDoc, updateDoc, deleteDoc, collection, addDoc, onSnapshot, orderBy, query } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBeTV2pkc1vL5txukRx8Q7zYPEQwCNBlxk",
+      authDomain: "sistema-de-tickets-soul.firebaseapp.com",
+      projectId: "sistema-de-tickets-soul",
+      storageBucket: "sistema-de-tickets-soul.firebasestorage.app",
+      messagingSenderId: "952665224219",
+      appId: "1:952665224219:web:f5f75795f0ca7c0b2ef4be"
+    };
+
+    // Inicializar Firebase
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // Exportar auth y db
+    window.auth = auth;
+    window.db = db;
+  </script>
+  <style>
+    body {
+      background: #f3f4f6;
+      font-family: 'Arial', sans-serif;
+      min-height: 100vh;
+    }
+    .navbar {
+      background: linear-gradient(to right, #1e3a8a, #3b82f6);
+      color: white;
+      padding: 1rem;
+    }
+    .detail-container {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      padding: 2rem;
+      max-width: 800px;
+      margin: 2rem auto;
+    }
+    .comment {
+      background: #f9fafb;
+      padding: 1rem;
+      border-radius: 5px;
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <!-- Barra de navegación -->
+  <nav class="navbar flex justify-between items-center">
+    <h1 class="text-xl font-bold">Sistema de Tickets</h1>
+    <div>
+      <a href="dashboard.html" class="text-white hover:underline"><i class="fas fa-arrow-left mr-2"></i>Volver al Dashboard</a>
+    </div>
+  </nav>
+
+  <!-- Detalle del ticket -->
+  <div class="detail-container">
+    <h2 class="text-2xl font-bold text-gray-800 mb-4" id="ticketTitle">Cargando...</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div>
+        <p><strong>Descripción:</strong> <span id="ticketDescription">Cargando...</span></p>
+        <p><strong>Prioridad:</strong> <span id="ticketPriority">Cargando...</span></p>
+        <p><strong>Categoría:</strong> <span id="ticketCategory">Cargando...</span></p>
+      </div>
+      <div>
+        <p><strong>Creado por:</strong> <span id="ticketCreatedBy">Cargando...</span></p>
+        <p><strong>Asignado a:</strong> <span id="ticketAssignedTo">Cargando...</span></p>
+        <p><strong>Fecha:</strong> <span id="ticketCreatedAt">Cargando...</span></p>
+      </div>
+    </div>
+
+    <!-- Estado del ticket -->
+    <div class="mb-6">
+      <label for="ticketStatus" class="block text-gray-700 mb-2"><i class="fas fa-info-circle mr-2"></i>Estado</label>
+      <select id="ticketStatus" class="p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <option value="open">Abierto</option>
+        <option value="in_progress">En Progreso</option>
+        <option value="closed">Cerrado</option>
+      </select>
+      <button id="updateStatusBtn" class="ml-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+        <i class="fas fa-save mr-2"></i>Actualizar Estado
+      </button>
+    </div>
+
+    <!-- Botón para eliminar -->
+    <button id="deleteTicketBtn" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 mb-6">
+      <i class="fas fa-trash mr-2"></i>Eliminar Ticket
+    </button>
+
+    <!-- Sección de comentarios -->
+    <h3 class="text-xl font-semibold text-gray-800 mb-4">Comentarios</h3>
+    <div id="commentsList" class="mb-4"></div>
+    <form id="commentForm">
+      <textarea id="commentText" class="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2" rows="3" placeholder="Escribe un comentario..." required></textarea>
+      <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+        <i class="fas fa-comment mr-2"></i>Agregar Comentario
+      </button>
+    </form>
+  </div>
+
+  <script>
+    // Verificar autenticación
+    let currentUser;
+    onAuthStateChanged(window.auth, (user) => {
+      if (!user) {
+        window.location.href = 'index.html';
+      } else {
+        currentUser = user;
+        loadTicketDetails();
+        loadComments();
+      }
+    });
+
+    // Obtener ticketId de la URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const ticketId = urlParams.get('ticketId');
+
+    // Cargar detalles del ticket
+    async function loadTicketDetails() {
+      if (!ticketId) {
+        Swal.fire({ icon: 'error', title: 'Error', text: 'No se especificó un ticket.' });
+        return;
+      }
+
+      const ticketRef = doc(window.db, 'tickets', ticketId);
+      const ticketSnap = await getDoc(ticketRef);
+      if (ticketSnap.exists()) {
+        const ticket = ticketSnap.data();
+        document.getElementById('ticketTitle').textContent = ticket.title;
+        document.getElementById('ticketDescription').textContent = ticket.description;
+        document.getElementById('ticketPriority').textContent = ticket.priority === 'low' ? 'Baja' : ticket.priority === 'medium' ? 'Media' : 'Alta';
+        document.getElementById('ticketCategory').textContent = ticket.category === 'support' ? 'Soporte' : ticket.category === 'bug' ? 'Error' : 'Mejora';
+        document.getElementById('ticketCreatedBy').textContent = ticket.createdBy;
+        document.getElementById('ticketAssignedTo').textContent = ticket.assignedTo || 'Sin asignar';
+        document.getElementById('ticketCreatedAt').textContent = new Date(ticket.createdAt).toLocaleString();
+        document.getElementById('ticketStatus').value = ticket.status;
+      } else {
+        Swal.fire({ icon: 'error', title: 'Error', text: 'Ticket no encontrado.' });
+      }
+    }
+
+    // Actualizar estado del ticket
+    document.getElementById('updateStatusBtn').addEventListener('click', async () => {
+      const newStatus = document.getElementById('ticketStatus').value;
+      const ticketRef = doc(window.db, 'tickets', ticketId);
+      try {
+        await updateDoc(ticketRef, { status: newStatus, updatedAt: new Date().toISOString() });
+        Swal.fire({ icon: 'success', title: 'Estado actualizado', timer: 1500, showConfirmButton: false });
+      } catch (error) {
+        Swal.fire({ icon: 'error', title: 'Error', text: error.message });
+      }
+    });
+
+    // Eliminar ticket
+    document.getElementById('deleteTicketBtn').addEventListener('click', () => {
+      Swal.fire({
+        title: '¿Estás seguro?',
+        text: 'No podrás recuperar este ticket.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, eliminar',
+        cancelButtonText: 'Cancelar'
+      }).then(async (result) => {
+        if (result.isConfirmed) {
+          const ticketRef = doc(window.db, 'tickets', ticketId);
+          await deleteDoc(ticketRef);
+          Swal.fire({ icon: 'success', title: 'Ticket eliminado', timer: 1500, showConfirmButton: false }).then(() => {
+            window.location.href = 'dashboard.html';
+          });
+        }
+      });
+    });
+
+    // Cargar comentarios en tiempo real
+    function loadComments() {
+      const commentsList = document.getElementById('commentsList');
+      const q = query(collection(window.db, 'tickets', ticketId, 'comments'), orderBy('createdAt', 'asc'));
+      onSnapshot(q, (snapshot) => {
+        commentsList.innerHTML = '';
+        snapshot.forEach((doc) => {
+          const comment = doc.data();
+          const div = document.createElement('div');
+          div.className = 'comment';
+          div.innerHTML = `
+            <p>${comment.text}</p>
+            <p class="text-sm text-gray-500">Por: ${comment.author} - ${new Date(comment.createdAt).toLocaleString()}</p>
+          `;
+          commentsList.appendChild(div);
+        });
+      });
+    }
+
+    // Agregar comentario
+    document.getElementById('commentForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const commentText = document.getElementById('commentText').value;
+
+      try {
+        await addDoc(collection(window.db, 'tickets', ticketId, 'comments'), {
+          text: commentText,
+          author: currentUser.uid,
+          createdAt: new Date().toISOString()
+        });
+        document.getElementById('commentText').value = '';
+        Swal.fire({ icon: 'success', title: 'Comentario agregado', timer: 1500, showConfirmButton: false });
+      } catch (error) {
+        Swal.fire({ icon: 'error', title: 'Error', text: error.message });
+      }
+    });
+  </script>
+</body>
+</html>
